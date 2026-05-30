@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.modeling_smolvlm_vla import SmolVLMVLA
 from models.processing_smolvlm_vla import SmolVLMVLAProcessor
+from models.configuration_smolvlm_vla import SmolVLMVLAConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,8 +65,30 @@ def load_model(checkpoint_path: str, norm_stats_path: str = None, smolvlm_model_
     global model, processor
     
     logger.info(f"Loading SimVLA from {checkpoint_path}...")
-    
-    model = SmolVLMVLA.from_pretrained(checkpoint_path)
+
+    checkpoint_path = Path(checkpoint_path)
+    config = SmolVLMVLAConfig.from_pretrained(checkpoint_path)
+    if smolvlm_model_path:
+        config.smolvlm_model_path = smolvlm_model_path
+
+    model = SmolVLMVLA(config)
+    safetensors_path = checkpoint_path / "model.safetensors"
+    pytorch_path = checkpoint_path / "pytorch_model.bin"
+    if safetensors_path.exists():
+        from safetensors.torch import load_file
+        state_dict = load_file(str(safetensors_path), device="cpu")
+    elif pytorch_path.exists():
+        state_dict = torch.load(pytorch_path, map_location="cpu")
+    else:
+        raise FileNotFoundError(f"No model.safetensors or pytorch_model.bin found in {checkpoint_path}")
+
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if missing:
+        logger.warning(f"Missing keys when loading checkpoint: {len(missing)}")
+    if unexpected:
+        logger.warning(f"Unexpected keys when loading checkpoint: {len(unexpected)}")
+    CONFIG["action_horizon"] = int(getattr(model, "num_actions", CONFIG["action_horizon"]))
+    CONFIG["image_size"] = int(getattr(model, "image_size", CONFIG["image_size"]))
     model = model.to(device)
     model.eval()
     

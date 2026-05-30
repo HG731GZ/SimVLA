@@ -1,0 +1,1456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>训练 Loss 监视器</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #d8dde6;
+      --line-strong: #b8c1cf;
+      --text: #17202f;
+      --muted: #647084;
+      --accent: #1677ff;
+      --accent-dark: #0f5ecb;
+      --smooth: #e45b32;
+      --raw: #246bce;
+      --ok: #1f8f61;
+      --warn: #a86b00;
+      --bad: #c33838;
+      --shadow: 0 18px 48px rgba(17, 28, 45, 0.10);
+      --radius: 8px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        linear-gradient(180deg, #eef4fb 0, rgba(246, 247, 249, 0) 340px),
+        var(--bg);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      min-height: 36px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--text);
+      background: #fff;
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+    }
+
+    button:hover {
+      border-color: #8da4c2;
+      background: #f8fbff;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    button.primary {
+      border-color: var(--accent);
+      color: #fff;
+      background: var(--accent);
+    }
+
+    button.primary:hover {
+      border-color: var(--accent-dark);
+      background: var(--accent-dark);
+    }
+
+    button.ghost {
+      border-color: transparent;
+      background: transparent;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 0 10px;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 14px 20px;
+      border-bottom: 1px solid rgba(159, 170, 187, 0.34);
+      background: rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(16px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+      font-weight: 760;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .brand span {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .path-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto auto auto;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .path-row input {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 168px;
+      justify-content: flex-end;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--line-strong);
+      box-shadow: 0 0 0 4px rgba(184, 193, 207, 0.16);
+    }
+
+    .dot.running {
+      background: var(--ok);
+      box-shadow: 0 0 0 4px rgba(31, 143, 97, 0.14);
+    }
+
+    .dot.warn {
+      background: var(--warn);
+      box-shadow: 0 0 0 4px rgba(168, 107, 0, 0.14);
+    }
+
+    .dot.bad {
+      background: var(--bad);
+      box-shadow: 0 0 0 4px rgba(195, 56, 56, 0.14);
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 18px;
+      padding: 18px;
+      min-height: 0;
+    }
+
+    .sidebar,
+    .chart-shell {
+      border: 1px solid rgba(178, 188, 204, 0.54);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding: 16px;
+      min-width: 0;
+      overflow: auto;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 10px;
+    }
+
+    .group-title {
+      font-size: 12px;
+      font-weight: 760;
+      color: #344052;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+    }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 86px;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .field label,
+    .switch span,
+    .legend span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .field input[type="number"] {
+      width: 86px;
+    }
+
+    .switch {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 36px;
+    }
+
+    .switch input {
+      width: 42px;
+      height: 23px;
+      appearance: none;
+      border-radius: 999px;
+      background: #cbd3df;
+      position: relative;
+      outline: none;
+      cursor: pointer;
+      transition: background 160ms ease;
+    }
+
+    .switch input::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.24);
+      transition: transform 160ms ease;
+    }
+
+    .switch input:checked {
+      background: var(--accent);
+    }
+
+    .switch input:checked::after {
+      transform: translateX(19px);
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .actions button:first-child {
+      grid-column: 1 / -1;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      min-width: 0;
+      background: #fbfcfe;
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .stat .value {
+      margin-top: 5px;
+      font-variant-numeric: tabular-nums;
+      font-size: 18px;
+      font-weight: 720;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .log-box {
+      min-height: 70px;
+      max-height: 130px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 9px 10px;
+      color: #3b4657;
+      background: #fbfcfe;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .chart-shell {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .chart-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 16px 10px;
+      border-bottom: 1px solid rgba(216, 221, 230, 0.74);
+    }
+
+    .chart-title {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 16px;
+      min-width: 0;
+    }
+
+    .chart-title h2 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .source-name {
+      max-width: min(56vw, 720px);
+      color: var(--muted);
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      white-space: nowrap;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .swatch {
+      width: 22px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--raw);
+    }
+
+    .swatch.smooth {
+      background: var(--smooth);
+    }
+
+    .canvas-wrap {
+      position: relative;
+      min-height: 360px;
+      background: #fff;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 360px;
+    }
+
+    .empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+      pointer-events: none;
+      font-size: 14px;
+    }
+
+    .tooltip {
+      position: absolute;
+      min-width: 148px;
+      padding: 8px 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 10px 30px rgba(17, 28, 45, 0.14);
+      color: var(--text);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      pointer-events: none;
+      transform: translate(-50%, calc(-100% - 12px));
+      display: none;
+      z-index: 3;
+    }
+
+    .tooltip strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .hidden-file {
+      display: none;
+    }
+
+    @media (max-width: 980px) {
+      .topbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+      }
+
+      .brand,
+      .status {
+        justify-content: flex-start;
+      }
+
+      .path-row {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .path-row input {
+        grid-column: 1 / -1;
+      }
+
+      .main {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        order: 2;
+      }
+
+      .chart-shell {
+        min-height: 58vh;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .topbar,
+      .main {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+
+      .path-row,
+      .actions,
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      .actions button:first-child {
+        grid-column: auto;
+      }
+
+      .chart-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .legend {
+        flex-wrap: wrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <h1>训练 Loss 监视器</h1>
+        <span>实时尾读</span>
+      </div>
+      <div class="path-row">
+        <input id="urlInput" type="text" value="runs/train_smolvlm.log" spellcheck="false" autocomplete="off" aria-label="日志路径或 URL">
+        <button id="urlBtn" title="从同源路径或 URL 读取">读取路径</button>
+        <button id="handleBtn" class="primary" title="使用浏览器文件句柄读取最新内容">选择实时文件</button>
+        <button id="fileBtn" title="普通文件选择">普通选择</button>
+        <input id="fileInput" class="hidden-file" type="file" accept=".log,.txt,text/plain">
+      </div>
+      <div class="status">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">等待文件</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <aside class="sidebar">
+        <section class="control-group">
+          <div class="group-title">刷新</div>
+          <div class="actions">
+            <button id="toggleBtn" class="primary">开始</button>
+            <button id="refreshBtn">刷新一次</button>
+            <button id="resetBtn">清空</button>
+          </div>
+          <div class="field">
+            <div class="field-row">
+              <label for="intervalInput">间隔 秒</label>
+              <input id="intervalInput" type="number" min="0.5" step="0.5" value="2">
+            </div>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <div class="group-title">尾部读取</div>
+          <div class="field">
+            <div class="field-row">
+              <label for="tailInput">初始尾部 MB</label>
+              <input id="tailInput" type="number" min="0.05" step="0.05" value="2">
+            </div>
+          </div>
+          <div class="field">
+            <div class="field-row">
+              <label for="maxPointsInput">最多点数</label>
+              <input id="maxPointsInput" type="number" min="100" step="100" value="8000">
+            </div>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <div class="group-title">平滑</div>
+          <label class="switch">
+            <span>移动平均</span>
+            <input id="smoothToggle" type="checkbox" checked>
+          </label>
+          <div class="field">
+            <div class="field-row">
+              <label for="smoothWindow">窗口</label>
+              <input id="smoothValue" type="number" min="2" max="1000" step="1" value="25">
+            </div>
+            <input id="smoothWindow" type="range" min="2" max="300" step="1" value="25">
+          </div>
+        </section>
+
+        <section class="control-group">
+          <div class="group-title">统计</div>
+          <div class="stats">
+            <div class="stat">
+              <div class="label">点数</div>
+              <div id="pointsStat" class="value">0</div>
+            </div>
+            <div class="stat">
+              <div class="label">最新 Step</div>
+              <div id="stepStat" class="value">-</div>
+            </div>
+            <div class="stat">
+              <div class="label">最新 Loss</div>
+              <div id="lossStat" class="value">-</div>
+            </div>
+            <div class="stat">
+              <div class="label">最小 Loss</div>
+              <div id="minStat" class="value">-</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <div class="group-title">状态</div>
+          <div id="messageBox" class="log-box">尚未读取。</div>
+        </section>
+      </aside>
+
+      <section class="chart-shell">
+        <div class="chart-head">
+          <div class="chart-title">
+            <h2>Loss 曲线</h2>
+            <div id="sourceName" class="source-name">未选择文件</div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><i class="swatch"></i><span>原始</span></span>
+            <span class="legend-item"><i class="swatch smooth"></i><span>平滑</span></span>
+          </div>
+        </div>
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="chartCanvas"></canvas>
+          <div id="emptyState" class="empty">等待 loss 数据</div>
+          <div id="tooltip" class="tooltip"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const $ = (id) => document.getElementById(id);
+      const els = {
+        urlInput: $("urlInput"),
+        urlBtn: $("urlBtn"),
+        handleBtn: $("handleBtn"),
+        fileBtn: $("fileBtn"),
+        fileInput: $("fileInput"),
+        toggleBtn: $("toggleBtn"),
+        refreshBtn: $("refreshBtn"),
+        resetBtn: $("resetBtn"),
+        intervalInput: $("intervalInput"),
+        tailInput: $("tailInput"),
+        maxPointsInput: $("maxPointsInput"),
+        smoothToggle: $("smoothToggle"),
+        smoothWindow: $("smoothWindow"),
+        smoothValue: $("smoothValue"),
+        statusDot: $("statusDot"),
+        statusText: $("statusText"),
+        messageBox: $("messageBox"),
+        sourceName: $("sourceName"),
+        chartCanvas: $("chartCanvas"),
+        canvasWrap: $("canvasWrap"),
+        emptyState: $("emptyState"),
+        tooltip: $("tooltip"),
+        pointsStat: $("pointsStat"),
+        stepStat: $("stepStat"),
+        lossStat: $("lossStat"),
+        minStat: $("minStat"),
+      };
+
+      const numberPattern = "[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?";
+      const lossRegex = new RegExp("(?:^|[^\\w])(?:train|eval|val)?[_/-]?loss(?![\\w])\\s*[:=]\\s*(" + numberPattern + ")", "i");
+      const stepRegexes = [
+        /\[(\d+)\s*\/\s*(\d+)\]/,
+        /\b(?:global_?)?step\s*[:=]\s*(\d+)\b/i,
+        /\b(?:iter|iteration)\s*[:=]\s*(\d+)\b/i,
+      ];
+
+      const state = {
+        mode: null,
+        handle: null,
+        file: null,
+        url: "",
+        name: "",
+        running: false,
+        polling: false,
+        timer: null,
+        lastOffset: 0,
+        partialLine: "",
+        started: false,
+        rangeUnsupported: false,
+        data: [],
+        seenSteps: new Set(),
+        hover: null,
+      };
+
+      function fmtNum(value, digits = 4) {
+        if (!Number.isFinite(value)) return "-";
+        if (Math.abs(value) >= 1000 || Math.abs(value) < 0.001 && value !== 0) {
+          return value.toExponential(3);
+        }
+        return value.toFixed(digits).replace(/\.?0+$/, "");
+      }
+
+      function fmtInt(value) {
+        if (!Number.isFinite(value)) return "-";
+        return Math.round(value).toLocaleString("en-US");
+      }
+
+      function addMessage(text, kind = "info") {
+        const time = new Date().toLocaleTimeString();
+        const prefix = kind === "error" ? "ERROR" : kind === "warn" ? "WARN" : "INFO";
+        els.messageBox.textContent = `[${time}] ${prefix} ${text}\n` + els.messageBox.textContent;
+      }
+
+      function setStatus(text, kind = "idle") {
+        els.statusText.textContent = text;
+        els.statusDot.className = "dot";
+        if (kind === "running") els.statusDot.classList.add("running");
+        if (kind === "warn") els.statusDot.classList.add("warn");
+        if (kind === "bad") els.statusDot.classList.add("bad");
+      }
+
+      function tailBytes() {
+        const mb = Math.max(0.01, Number(els.tailInput.value) || 2);
+        return Math.round(mb * 1024 * 1024);
+      }
+
+      function maxPoints() {
+        return Math.max(100, Math.floor(Number(els.maxPointsInput.value) || 8000));
+      }
+
+      function smoothWindow() {
+        return Math.max(2, Math.floor(Number(els.smoothValue.value) || 25));
+      }
+
+      function resetSeries({ keepSource = true } = {}) {
+        state.lastOffset = 0;
+        state.partialLine = "";
+        state.started = false;
+        state.rangeUnsupported = false;
+        state.data = [];
+        state.seenSteps = new Set();
+        state.hover = null;
+        if (!keepSource) {
+          state.mode = null;
+          state.handle = null;
+          state.file = null;
+          state.url = "";
+          state.name = "";
+          els.sourceName.textContent = "未选择文件";
+        }
+        updateStats();
+        draw();
+      }
+
+      function setSource(mode, source, name) {
+        stopPolling();
+        resetSeries();
+        state.mode = mode;
+        state.name = name || "未命名日志";
+        if (mode === "handle") {
+          state.handle = source;
+          state.file = null;
+          state.url = "";
+        } else if (mode === "file") {
+          state.file = source;
+          state.handle = null;
+          state.url = "";
+        } else if (mode === "url") {
+          state.url = source;
+          state.handle = null;
+          state.file = null;
+        }
+        els.urlInput.value = displayPathForSource(mode, source, state.name);
+        els.sourceName.textContent = state.name;
+        setStatus("已选择", "warn");
+      }
+
+      function displayPathForSource(mode, source, fallbackName) {
+        if (mode === "url") return source;
+
+        const visibleName = source && (source.webkitRelativePath || source.name) || fallbackName;
+        const typedPath = els.urlInput.value.trim();
+        const typedName = typedPath.split(/[\\/]/).filter(Boolean).pop();
+
+        if (typedPath && typedName === visibleName) {
+          return typedPath;
+        }
+        return visibleName;
+      }
+
+      function startPolling() {
+        if (!state.mode) {
+          addMessage("请先选择实时文件、普通文件，或输入可访问路径。", "warn");
+          return;
+        }
+        state.running = true;
+        els.toggleBtn.textContent = "暂停";
+        setStatus("读取中", "running");
+        scheduleNext(0);
+      }
+
+      function stopPolling() {
+        state.running = false;
+        els.toggleBtn.textContent = "开始";
+        if (state.timer) {
+          clearTimeout(state.timer);
+          state.timer = null;
+        }
+        if (state.mode) setStatus("已暂停", "warn");
+      }
+
+      function scheduleNext(delay) {
+        if (state.timer) clearTimeout(state.timer);
+        if (!state.running) return;
+        const ms = delay ?? Math.max(500, Number(els.intervalInput.value) * 1000 || 2000);
+        state.timer = setTimeout(() => {
+          pollOnce().finally(() => {
+            if (state.running) {
+              scheduleNext(Math.max(500, Number(els.intervalInput.value) * 1000 || 2000));
+            }
+          });
+        }, ms);
+      }
+
+      async function blobToText(blob) {
+        if (!blob || blob.size === 0) return "";
+        return await blob.text();
+      }
+
+      async function getCurrentFile() {
+        if (state.mode === "handle" && state.handle) {
+          return await state.handle.getFile();
+        }
+        if (state.mode === "file" && state.file) {
+          return state.file;
+        }
+        return null;
+      }
+
+      async function readFromFileLike() {
+        const file = await getCurrentFile();
+        if (!file) throw new Error("没有可读取的文件。");
+
+        const size = file.size;
+        if (!state.started) {
+          const start = Math.max(0, size - tailBytes());
+          const text = await blobToText(file.slice(start, size));
+          state.lastOffset = size;
+          state.started = true;
+          parseText(text, { dropFirstLine: start > 0, finalChunk: true });
+          addMessage(`读取 ${state.name} 尾部 ${fmtInt(size - start)} bytes。`);
+          return;
+        }
+
+        if (size < state.lastOffset) {
+          addMessage("文件尺寸变小，已按新日志重新读取。", "warn");
+          resetSeries();
+          return await readFromFileLike();
+        }
+
+        if (size === state.lastOffset) {
+          return;
+        }
+
+        const text = await blobToText(file.slice(state.lastOffset, size));
+        state.lastOffset = size;
+        parseText(text, { dropFirstLine: false, finalChunk: false });
+      }
+
+      async function readFromUrl() {
+        if (!state.url) throw new Error("路径为空。");
+
+        if (!state.started) {
+          const probe = await fetchRange(state.url, -tailBytes());
+          const text = probe.text;
+          state.lastOffset = probe.totalSize || probe.endOffset || 0;
+          state.started = true;
+          state.rangeUnsupported = !probe.partial;
+          parseText(text, { dropFirstLine: probe.partial && probe.startOffset > 0, finalChunk: true });
+          if (probe.partial) {
+            addMessage(`读取 ${state.name} 尾部 ${fmtInt(text.length)} chars。`);
+          } else {
+            addMessage("服务器未返回 Range 片段，已从完整响应中截取尾部。", "warn");
+          }
+          return;
+        }
+
+        if (state.rangeUnsupported) {
+          const probe = await fetchRange(state.url, -tailBytes());
+          resetSeries();
+          state.started = true;
+          state.rangeUnsupported = !probe.partial;
+          state.lastOffset = probe.totalSize || probe.endOffset || 0;
+          parseText(probe.text, { dropFirstLine: probe.partial && probe.startOffset > 0, finalChunk: true });
+          return;
+        }
+
+        const probe = await fetchRange(state.url, state.lastOffset);
+        if (probe.notModified) return;
+        if (!probe.partial) {
+          addMessage("服务器停止支持 Range，切换为尾部重读。", "warn");
+          state.rangeUnsupported = true;
+          return;
+        }
+        if (probe.totalSize && probe.totalSize < state.lastOffset) {
+          addMessage("远端日志尺寸变小，已按新日志重新读取。", "warn");
+          resetSeries();
+          state.started = true;
+          state.lastOffset = probe.totalSize;
+          parseText(probe.text, { dropFirstLine: probe.startOffset > 0, finalChunk: true });
+          return;
+        }
+        state.lastOffset = probe.endOffset;
+        parseText(probe.text, { dropFirstLine: false, finalChunk: false });
+      }
+
+      async function fetchRange(url, start) {
+        const headers = {};
+        if (start < 0) {
+          headers.Range = `bytes=${start}`;
+        } else {
+          headers.Range = `bytes=${start}-`;
+        }
+
+        const sep = url.includes("?") ? "&" : "?";
+        const bustUrl = `${url}${sep}_lossviz=${Date.now()}`;
+        const response = await fetch(bustUrl, { cache: "no-store", headers });
+
+        if (response.status === 416) {
+          return { text: "", partial: true, notModified: true, startOffset: start, endOffset: start };
+        }
+        if (!response.ok && response.status !== 206) {
+          throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const rawText = await response.text();
+        const contentRange = response.headers.get("Content-Range");
+        if (response.status === 206 && contentRange) {
+          const match = contentRange.match(/bytes\s+(\d+)-(\d+)\/(\d+|\*)/i);
+          if (match) {
+            return {
+              text: rawText,
+              partial: true,
+              startOffset: Number(match[1]),
+              endOffset: Number(match[2]) + 1,
+              totalSize: match[3] === "*" ? undefined : Number(match[3]),
+            };
+          }
+        }
+
+        const text = rawText.length > tailBytes() ? rawText.slice(-tailBytes()) : rawText;
+        return {
+          text,
+          partial: false,
+          startOffset: Math.max(0, rawText.length - text.length),
+          endOffset: rawText.length,
+          totalSize: rawText.length,
+        };
+      }
+
+      async function pollOnce() {
+        if (state.polling) return;
+        if (!state.mode) {
+          addMessage("没有数据源。", "warn");
+          return;
+        }
+
+        state.polling = true;
+        try {
+          const before = state.data.length;
+          if (state.mode === "url") {
+            await readFromUrl();
+          } else {
+            await readFromFileLike();
+          }
+          const added = state.data.length - before;
+          if (added > 0) {
+            trimData();
+            updateStats();
+            draw();
+            setStatus(`新增 ${added} 点`, "running");
+          } else {
+            updateStats();
+            draw();
+            setStatus("等待更新", state.running ? "running" : "warn");
+          }
+        } catch (error) {
+          setStatus("读取失败", "bad");
+          addMessage(error.message || String(error), "error");
+        } finally {
+          state.polling = false;
+        }
+      }
+
+      function parseText(text, { dropFirstLine, finalChunk }) {
+        if (!text) return;
+        let chunk = state.partialLine + text;
+        state.partialLine = "";
+
+        if (dropFirstLine) {
+          const firstBreak = chunk.search(/\r?\n/);
+          if (firstBreak >= 0) {
+            chunk = chunk.slice(firstBreak + (chunk[firstBreak] === "\r" && chunk[firstBreak + 1] === "\n" ? 2 : 1));
+          } else {
+            return;
+          }
+        }
+
+        const endsWithBreak = /\r?\n$/.test(chunk);
+        let lines = chunk.split(/\r?\n/);
+        if (!endsWithBreak && !finalChunk) {
+          state.partialLine = lines.pop() || "";
+        } else if (lines.length && lines[lines.length - 1] === "") {
+          lines.pop();
+        }
+
+        const parsed = [];
+        for (const line of lines) {
+          const point = parseLine(line);
+          if (point) parsed.push(point);
+        }
+        appendPoints(parsed);
+      }
+
+      function parseLine(line) {
+        const lossMatch = line.match(lossRegex);
+        if (!lossMatch) return null;
+
+        const loss = Number(lossMatch[1]);
+        if (!Number.isFinite(loss)) return null;
+
+        let step = null;
+        let total = null;
+        for (const regex of stepRegexes) {
+          const stepMatch = line.match(regex);
+          if (stepMatch) {
+            step = Number(stepMatch[1]);
+            total = stepMatch[2] ? Number(stepMatch[2]) : null;
+            break;
+          }
+        }
+
+        return {
+          step: Number.isFinite(step) ? step : null,
+          total: Number.isFinite(total) ? total : null,
+          loss,
+          line,
+        };
+      }
+
+      function appendPoints(points) {
+        if (!points.length) return;
+        for (const point of points) {
+          if (point.step !== null) {
+            if (state.seenSteps.has(point.step)) continue;
+            state.seenSteps.add(point.step);
+          }
+          state.data.push(point);
+        }
+      }
+
+      function trimData() {
+        const max = maxPoints();
+        if (state.data.length <= max) return;
+        state.data = state.data.slice(-max);
+        state.seenSteps = new Set(state.data.filter((d) => d.step !== null).map((d) => d.step));
+      }
+
+      function movingAverage(values, windowSize) {
+        const out = new Array(values.length);
+        let sum = 0;
+        const queue = [];
+        for (let i = 0; i < values.length; i++) {
+          sum += values[i];
+          queue.push(values[i]);
+          if (queue.length > windowSize) {
+            sum -= queue.shift();
+          }
+          out[i] = sum / queue.length;
+        }
+        return out;
+      }
+
+      function seriesForDraw() {
+        const data = state.data;
+        const losses = data.map((d) => d.loss);
+        const smooth = els.smoothToggle.checked && data.length
+          ? movingAverage(losses, smoothWindow())
+          : null;
+        const xs = data.map((d, index) => d.step === null ? index + 1 : d.step);
+        return { data, xs, losses, smooth };
+      }
+
+      function updateStats() {
+        const data = state.data;
+        els.pointsStat.textContent = fmtInt(data.length);
+        if (!data.length) {
+          els.stepStat.textContent = "-";
+          els.lossStat.textContent = "-";
+          els.minStat.textContent = "-";
+          els.emptyState.style.display = "grid";
+          return;
+        }
+        const last = data[data.length - 1];
+        const min = data.reduce((acc, point) => Math.min(acc, point.loss), Infinity);
+        els.stepStat.textContent = last.step === null ? fmtInt(data.length) : fmtInt(last.step);
+        els.lossStat.textContent = fmtNum(last.loss);
+        els.minStat.textContent = fmtNum(min);
+        els.emptyState.style.display = "none";
+      }
+
+      function resizeCanvas() {
+        const rect = els.canvasWrap.getBoundingClientRect();
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const width = Math.max(320, Math.floor(rect.width));
+        const height = Math.max(360, Math.floor(rect.height));
+        const canvas = els.chartCanvas;
+        if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+          canvas.width = Math.floor(width * dpr);
+          canvas.height = Math.floor(height * dpr);
+          canvas.style.width = `${width}px`;
+          canvas.style.height = `${height}px`;
+        }
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { ctx, width, height };
+      }
+
+      function draw() {
+        const { ctx, width, height } = resizeCanvas();
+        ctx.clearRect(0, 0, width, height);
+
+        const { data, xs, losses, smooth } = seriesForDraw();
+        const pad = { left: 62, right: 24, top: 24, bottom: 44 };
+        const plotW = Math.max(1, width - pad.left - pad.right);
+        const plotH = Math.max(1, height - pad.top - pad.bottom);
+
+        drawGrid(ctx, width, height, pad);
+        if (!data.length) {
+          drawAxes(ctx, pad, plotW, plotH, 0, 1, 0, 1);
+          hideTooltip();
+          return;
+        }
+
+        const allY = smooth ? losses.concat(smooth) : losses;
+        let minY = Math.min(...allY);
+        let maxY = Math.max(...allY);
+        if (minY === maxY) {
+          minY -= 0.5;
+          maxY += 0.5;
+        } else {
+          const margin = (maxY - minY) * 0.08;
+          minY -= margin;
+          maxY += margin;
+        }
+        minY = Math.max(0, minY);
+
+        let minX = Math.min(...xs);
+        let maxX = Math.max(...xs);
+        if (minX === maxX) {
+          minX -= 1;
+          maxX += 1;
+        }
+        maxX += rightDomainPadding(xs, minX, maxX);
+
+        const scaleX = (x) => pad.left + ((x - minX) / (maxX - minX)) * plotW;
+        const scaleY = (y) => pad.top + (1 - (y - minY) / (maxY - minY)) * plotH;
+
+        drawAxes(ctx, pad, plotW, plotH, minX, maxX, minY, maxY);
+        drawLine(ctx, xs, losses, scaleX, scaleY, "rgba(36, 107, 206, 0.72)", 1.35);
+        if (smooth) {
+          drawLine(ctx, xs, smooth, scaleX, scaleY, "rgba(228, 91, 50, 0.95)", 2.25);
+        }
+
+        if (state.hover) {
+          drawHover(ctx, data, xs, losses, smooth, scaleX, scaleY, pad, plotW, plotH);
+        }
+      }
+
+      function rightDomainPadding(xs, minX, maxX) {
+        const span = maxX - minX;
+        if (!Number.isFinite(span) || span <= 0) return 1;
+        const gaps = [];
+        for (let i = 1; i < xs.length; i++) {
+          const gap = Math.abs(xs[i] - xs[i - 1]);
+          if (gap > 0 && Number.isFinite(gap)) gaps.push(gap);
+        }
+        gaps.sort((a, b) => a - b);
+        const typicalGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : span * 0.02;
+        return Math.min(Math.max(typicalGap * 2, span * 0.015), span * 0.08);
+      }
+
+      function drawGrid(ctx, width, height, pad) {
+        ctx.save();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = "#edf0f5";
+        ctx.lineWidth = 1;
+        const x0 = pad.left;
+        const y0 = pad.top;
+        const x1 = width - pad.right;
+        const y1 = height - pad.bottom;
+        for (let i = 0; i <= 5; i++) {
+          const y = y0 + ((y1 - y0) * i) / 5;
+          ctx.beginPath();
+          ctx.moveTo(x0, y);
+          ctx.lineTo(x1, y);
+          ctx.stroke();
+        }
+        for (let i = 0; i <= 6; i++) {
+          const x = x0 + ((x1 - x0) * i) / 6;
+          ctx.beginPath();
+          ctx.moveTo(x, y0);
+          ctx.lineTo(x, y1);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawAxes(ctx, pad, plotW, plotH, minX, maxX, minY, maxY) {
+        ctx.save();
+        ctx.strokeStyle = "#b8c1cf";
+        ctx.fillStyle = "#647084";
+        ctx.lineWidth = 1;
+        ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+        ctx.textBaseline = "middle";
+
+        const x0 = pad.left;
+        const y0 = pad.top;
+        const x1 = pad.left + plotW;
+        const y1 = pad.top + plotH;
+
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x0, y1);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+
+        ctx.textAlign = "right";
+        for (let i = 0; i <= 5; i++) {
+          const t = i / 5;
+          const y = y1 - plotH * t;
+          const value = minY + (maxY - minY) * t;
+          ctx.fillText(fmtNum(value, 3), x0 - 8, y);
+        }
+
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        for (let i = 0; i <= 6; i++) {
+          const t = i / 6;
+          const x = x0 + plotW * t;
+          const value = minX + (maxX - minX) * t;
+          ctx.fillText(fmtInt(value), x, y1 + 10);
+        }
+
+        ctx.fillStyle = "#344052";
+        ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText("loss", x0, y0 - 18);
+        ctx.textAlign = "right";
+        ctx.fillText("step", x1, y1 + 28);
+        ctx.restore();
+      }
+
+      function drawLine(ctx, xs, ys, scaleX, scaleY, color, width) {
+        if (xs.length < 2) return;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        for (let i = 0; i < xs.length; i++) {
+          const x = scaleX(xs[i]);
+          const y = scaleY(ys[i]);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawHover(ctx, data, xs, losses, smooth, scaleX, scaleY, pad, plotW, plotH) {
+        const xMin = pad.left;
+        const xMax = pad.left + plotW;
+        const yMin = pad.top;
+        const yMax = pad.top + plotH;
+        const mouseX = Math.min(xMax, Math.max(xMin, state.hover.x));
+
+        let bestIndex = 0;
+        let bestDistance = Infinity;
+        for (let i = 0; i < xs.length; i++) {
+          const distance = Math.abs(scaleX(xs[i]) - mouseX);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = i;
+          }
+        }
+
+        const x = scaleX(xs[bestIndex]);
+        const rawY = scaleY(losses[bestIndex]);
+        const smoothY = smooth ? scaleY(smooth[bestIndex]) : rawY;
+
+        ctx.save();
+        ctx.strokeStyle = "rgba(52, 64, 82, 0.35)";
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x, yMin);
+        ctx.lineTo(x, yMax);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = "#246bce";
+        ctx.beginPath();
+        ctx.arc(x, rawY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        if (smooth) {
+          ctx.fillStyle = "#e45b32";
+          ctx.beginPath();
+          ctx.arc(x, smoothY, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        const point = data[bestIndex];
+        const title = point.step === null ? `#${fmtInt(bestIndex + 1)}` : `step ${fmtInt(point.step)}`;
+        els.tooltip.innerHTML =
+          `<strong>${title}</strong>` +
+          `loss: ${fmtNum(point.loss)}<br>` +
+          (smooth ? `avg: ${fmtNum(smooth[bestIndex])}<br>` : "") +
+          (point.total ? `total: ${fmtInt(point.total)}` : "");
+        els.tooltip.style.display = "block";
+        els.tooltip.style.left = `${x}px`;
+        els.tooltip.style.top = `${Math.max(yMin + 48, Math.min(rawY, yMax))}px`;
+      }
+
+      function hideTooltip() {
+        els.tooltip.style.display = "none";
+      }
+
+      els.handleBtn.addEventListener("click", async () => {
+        if (!("showOpenFilePicker" in window)) {
+          addMessage("当前浏览器不支持实时文件句柄，请使用 Chromium/Edge，或通过本地服务读取路径。", "warn");
+          els.fileInput.click();
+          return;
+        }
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            multiple: false,
+            types: [
+              {
+                description: "Log files",
+                accept: { "text/plain": [".log", ".txt", ".out"] },
+              },
+            ],
+          });
+          setSource("handle", handle, handle.name);
+          await pollOnce();
+          startPolling();
+        } catch (error) {
+          if (error && error.name !== "AbortError") {
+            addMessage(error.message || String(error), "error");
+          }
+        }
+      });
+
+      els.fileBtn.addEventListener("click", () => {
+        els.fileInput.click();
+      });
+
+      els.fileInput.addEventListener("change", async () => {
+        const file = els.fileInput.files && els.fileInput.files[0];
+        if (!file) return;
+        setSource("file", file, file.name);
+        await pollOnce();
+      });
+
+      els.urlBtn.addEventListener("click", async () => {
+        const url = els.urlInput.value.trim();
+        if (!url) {
+          addMessage("路径为空。", "warn");
+          return;
+        }
+        setSource("url", url, url);
+        await pollOnce();
+      });
+
+      els.toggleBtn.addEventListener("click", () => {
+        if (state.running) stopPolling();
+        else startPolling();
+      });
+
+      els.refreshBtn.addEventListener("click", () => {
+        pollOnce();
+      });
+
+      els.resetBtn.addEventListener("click", () => {
+        resetSeries();
+        addMessage("已清空曲线。");
+      });
+
+      els.maxPointsInput.addEventListener("change", () => {
+        trimData();
+        updateStats();
+        draw();
+      });
+
+      els.smoothWindow.addEventListener("input", () => {
+        els.smoothValue.value = els.smoothWindow.value;
+        draw();
+      });
+
+      els.smoothValue.addEventListener("input", () => {
+        const value = Math.max(2, Math.min(1000, Number(els.smoothValue.value) || 25));
+        els.smoothWindow.value = Math.min(300, value);
+        draw();
+      });
+
+      els.smoothToggle.addEventListener("change", draw);
+
+      els.chartCanvas.addEventListener("mousemove", (event) => {
+        const rect = els.chartCanvas.getBoundingClientRect();
+        state.hover = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+        draw();
+      });
+
+      els.chartCanvas.addEventListener("mouseleave", () => {
+        state.hover = null;
+        hideTooltip();
+        draw();
+      });
+
+      window.addEventListener("resize", draw);
+
+      updateStats();
+      draw();
+      if (!("showOpenFilePicker" in window)) {
+        addMessage("实时文件句柄不可用；可用普通选择或本地服务路径。", "warn");
+      }
+    })();
+  </script>
+</body>
+</html>

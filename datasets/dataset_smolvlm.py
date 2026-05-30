@@ -167,7 +167,11 @@ class SmolVLMDataReader(IterableDataset):
                     
                     yield sample
             except Exception as e:
-                continue
+                traj_info = meta["datalist"][traj_idx]
+                traj_path = traj_info.get("path", traj_info) if isinstance(traj_info, dict) else traj_info
+                raise RuntimeError(
+                    f"Failed to iterate dataset '{dataset_name}' trajectory {traj_idx}: {traj_path}"
+                ) from e
                 
         if self.training:
             yield from self._iter_one_dataset(dataset_name)

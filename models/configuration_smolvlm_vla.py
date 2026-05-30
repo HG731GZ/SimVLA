@@ -30,6 +30,7 @@ class SmolVLMVLAConfig(PretrainedConfig):
         self,
         # === SmolVLM backbone ===
         smolvlm_model_path: str = "HuggingFaceTB/SmolVLM-500M-Instruct",
+        vlm_torch_dtype: str = "float32",
         
         # === Transformer head ===
         hidden_size: int = 768,  # Action transformer hidden size
@@ -55,6 +56,7 @@ class SmolVLMVLAConfig(PretrainedConfig):
     ):
         # SmolVLM backbone path
         self.smolvlm_model_path = smolvlm_model_path
+        self.vlm_torch_dtype = vlm_torch_dtype
         
         # Transformer hyperparameters
         self.hidden_size = hidden_size

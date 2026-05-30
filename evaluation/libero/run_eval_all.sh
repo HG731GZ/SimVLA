@@ -9,11 +9,13 @@ set -e
 # LIBERO Environment Setup
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export LIBERO_ROOT="${SCRIPT_DIR}/LIBERO"
+export LIBERO_ROOT="${LIBERO_ROOT:-/mnt/data/LIBERO}"
+export LIBERO_CONFIG_PATH="${LIBERO_CONFIG_PATH:-${SCRIPT_DIR}/.libero_config}"
 export PYTHONPATH="${LIBERO_ROOT}:${PYTHONPATH}"
 
 echo "LIBERO Environment:"
 echo "   LIBERO_ROOT: $LIBERO_ROOT"
+echo "   LIBERO_CONFIG_PATH: $LIBERO_CONFIG_PATH"
 echo "   PYTHONPATH: $PYTHONPATH"
 echo ""
 

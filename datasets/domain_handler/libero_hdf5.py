@@ -100,11 +100,40 @@ class LiberoHDF5Handler(DomainHandler):
         if "datalist" in meta:
             for item in meta["datalist"]:
                 if isinstance(item, dict):
-                    self.h5_files.append(item["path"])
+                    self.h5_files.append(self._resolve_h5_path(item["path"]))
                     self.task_names.append(item.get("task", ""))
                 else:
-                    self.h5_files.append(item)
+                    self.h5_files.append(self._resolve_h5_path(item))
                     self.task_names.append(self._parse_task_from_filename(item))
+
+        missing_files = [path for path in self.h5_files if not os.path.exists(path)]
+        if missing_files:
+            preview = "\n".join(f"  - {path}" for path in missing_files[:10])
+            more = "" if len(missing_files) <= 10 else f"\n  ... and {len(missing_files) - 10} more"
+            raise FileNotFoundError(
+                "LIBERO metadata points to missing HDF5 files. "
+                "Regenerate datasets/metas/libero_train.json with create_libero_meta.py.\n"
+                f"{preview}{more}"
+            )
+
+    def _resolve_h5_path(self, path: str) -> str:
+        """Resolve stale flat LIBERO-100 paths to the grouped local layout."""
+        if os.path.exists(path):
+            return path
+
+        subset = os.path.basename(os.path.dirname(path))
+        if subset in {"libero_10", "libero_90"} and self.data_dir:
+            grouped = os.path.join(self.data_dir, "libero_100", subset, os.path.basename(path))
+            if os.path.exists(grouped):
+                return grouped
+
+        if subset in {"libero_10", "libero_90"}:
+            root = os.path.dirname(os.path.dirname(path))
+            grouped = os.path.join(root, "libero_100", subset, os.path.basename(path))
+            if os.path.exists(grouped):
+                return grouped
+
+        return path
         
     def _parse_task_from_filename(self, filepath: str) -> str:
         """Parse task description from filename."""

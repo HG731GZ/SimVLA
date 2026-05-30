@@ -93,6 +93,8 @@ def get_args_parser():
     parser.add_argument("--train_metas_path", type=str, required=True, 
                         help="Path to training metadata")
     parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1,
+                        help="Number of micro-batches to accumulate before each optimizer step")
     parser.add_argument("--image_size", type=int, default=384, 
                         help="Image size for SmolVLM (default: 384, can be 384 or 512)")
 
@@ -153,6 +155,11 @@ def get_args_parser():
                         help="Number of transformer layers")
     parser.add_argument("--num_heads", type=int, default=12,
                         help="Number of attention heads")
+    parser.add_argument("--max_len_seq", type=int, default=2048,
+                        help="Maximum transformer sequence length")
+    parser.add_argument("--vlm_torch_dtype", type=str, default="float32",
+                        choices=["float32", "fp32", "float16", "fp16", "bfloat16", "bf16", "auto"],
+                        help="Torch dtype used when loading the SmolVLM backbone")
 
     return parser
 
@@ -201,6 +208,14 @@ def get_group_lr(optim: torch.optim.Optimizer, name: str) -> float:
     return 0.0
 
 
+def set_group_trainable(optim: torch.optim.Optimizer, name: str, trainable: bool):
+    """Enable/disable gradients for an optimizer parameter group."""
+    for g in optim.param_groups:
+        if g["name"] == name:
+            for p in g["params"]:
+                p.requires_grad_(trainable)
+
+
 def linear_warmup_cosine(step, start, warmup, total, base_lr, min_ratio):
     """Linear warmup followed by cosine decay."""
     if step < start:
@@ -242,6 +257,8 @@ def update_group_lrs(optim, step, args):
 # ============================================================
 def main(args):
     output_dir = Path(args.output_dir)
+    if args.gradient_accumulation_steps < 1:
+        raise ValueError("--gradient_accumulation_steps must be >= 1")
     
     # WandB setup
     wandb_api_key = os.environ.get("WANDB_API_KEY") or args.wandb_api_key
@@ -258,6 +275,7 @@ def main(args):
     accelerator = Accelerator(
         log_with=log_with,
         project_dir=output_dir,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         kwargs_handlers=[ddp_kwargs]
     )
 
@@ -265,6 +283,10 @@ def main(args):
     tracker_config = {
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "effective_global_batch_size": (
+            args.batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+        ),
         "iters": args.iters,
         "smolvlm_model_path": args.smolvlm_model_path,
         "freeze_steps": args.freeze_steps,
@@ -276,6 +298,8 @@ def main(args):
         "hidden_size": args.hidden_size,
         "depth": args.depth,
         "use_adaln": args.use_adaln,
+        "max_len_seq": args.max_len_seq,
+        "vlm_torch_dtype": args.vlm_torch_dtype,
     }
     
     if use_wandb:
@@ -294,6 +318,13 @@ def main(args):
     logger.info(f"Args: {args}")
     logger.info(f"Using SmolVLM backbone: {args.smolvlm_model_path}")
     logger.info(f"Image size: {args.image_size}x{args.image_size}")
+    logger.info(
+        "Batching: per_process=%d, world_size=%d, grad_accum=%d, effective_global=%d",
+        args.batch_size,
+        accelerator.num_processes,
+        args.gradient_accumulation_steps,
+        args.batch_size * accelerator.num_processes * args.gradient_accumulation_steps,
+    )
 
     # Load model
     from models.configuration_smolvlm_vla import SmolVLMVLAConfig
@@ -341,6 +372,8 @@ def main(args):
             num_actions=args.num_actions,
             use_adaln=args.use_adaln,
             image_size=args.image_size,
+            max_len_seq=args.max_len_seq,
+            vlm_torch_dtype=args.vlm_torch_dtype,
         )
         model = SmolVLMVLA(config)
         
@@ -390,25 +423,33 @@ def main(args):
     logger.info(f"   world_size={accelerator.num_processes}")
 
     for batch in train_dataloader:
-        # Encode language
-        lang = processor.encode_language(batch["language_instruction"])
-        batch.pop("language_instruction", None)
-        inputs = {**batch, **lang}
-        inputs = {k: v.cuda(non_blocking=True) for k, v in inputs.items()}
-        
-        # Update LR
-        update_group_lrs(optim, global_step, args)
+        with accelerator.accumulate(model):
+            # Encode language
+            lang = processor.encode_language(batch["language_instruction"])
+            batch.pop("language_instruction", None)
+            inputs = {**batch, **lang}
+            inputs = {k: v.to(accelerator.device, non_blocking=True) for k, v in inputs.items()}
+            
+            # Update LR
+            update_group_lrs(optim, global_step, args)
+            freeze_feature_modules = global_step < args.freeze_steps
+            set_group_trainable(optim, "vlm", (not freeze_feature_modules) and args.learning_coef != 0.0)
+            set_group_trainable(optim, "transformer_core", not freeze_feature_modules)
+            set_group_trainable(optim, "action_heads", True)
 
-        # Forward
-        loss_dict: Dict[str, torch.Tensor] = model(**inputs)
-        loss = sum(loss_dict.values())
-        
-        # Backward
-        accelerator.backward(loss)
-        if args.max_grad_norm:
-            accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-        optim.step()
-        optim.zero_grad()
+            # Forward
+            loss_dict: Dict[str, torch.Tensor] = model(**inputs)
+            loss = sum(loss_dict.values())
+            
+            # Backward
+            accelerator.backward(loss)
+            if accelerator.sync_gradients and args.max_grad_norm:
+                accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            optim.step()
+            optim.zero_grad()
+
+        if not accelerator.sync_gradients:
+            continue
 
         # Logging
         if global_step % args.log_interval == 0:

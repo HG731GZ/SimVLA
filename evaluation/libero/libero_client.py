@@ -89,12 +89,20 @@ class WebSocketClient:
     
     Requires: pip install openpi-client
     """
-    def __init__(self, host: str, port: int, replan_steps: int = 5, resize_size: int = 224):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        replan_steps: int = 5,
+        resize_size: int = 224,
+        clip_actions: bool = True,
+    ):
         if not HAS_WS_CLIENT:
             raise ImportError("openpi_client not installed. Run: pip install openpi-client")
         self.client = ws_client.WebsocketClientPolicy(host, port)
         self.replan_steps = replan_steps
         self.resize_size = resize_size
+        self.clip_actions = clip_actions
         self.reset()
 
     def reset(self) -> None:
@@ -132,16 +140,20 @@ class WebSocketClient:
             for i in range(min(self.replan_steps, len(action_chunk))):
                 self.action_plan.append(action_chunk[i])
 
-        return self.action_plan.popleft()
+        action = self.action_plan.popleft()
+        if self.clip_actions:
+            action = np.clip(action, -1.0, 1.0)
+        return action
 
 
 class HTTPClient:
     """
     HTTP client for SimVLA server.
     """
-    def __init__(self, host: str, port: int, replan_steps: int = 5):
+    def __init__(self, host: str, port: int, replan_steps: int = 5, clip_actions: bool = True):
         self.url = f"http://{host}:{port}/act"
         self.replan_steps = replan_steps
+        self.clip_actions = clip_actions
         self.reset()
 
     def reset(self) -> None:
@@ -182,7 +194,10 @@ class HTTPClient:
             for action in action_chunk[:self.replan_steps]:
                 self.action_plan.append(action)
 
-        return self.action_plan.popleft()
+        action = self.action_plan.popleft()
+        if self.clip_actions:
+            action = np.clip(action, -1.0, 1.0)
+        return action
 
 
 # -----------------------------------------------------------------------------
@@ -205,6 +220,8 @@ def eval_libero(
     seed: int = 7,
     video_out_path: str = "data/libero/videos",
     save_video: bool = True,
+    task_ids: Optional[List[int]] = None,
+    max_steps_override: Optional[int] = None,
 ) -> float:
     """
     Run LIBERO evaluation across all tasks in a suite.
@@ -214,17 +231,24 @@ def eval_libero(
     # Initialize task suite
     task_suite = benchmark_dict[task_suite_name]()
     num_tasks = task_suite.n_tasks
-    max_steps = MAX_STEPS.get(task_suite_name, 400)
+    max_steps = max_steps_override or MAX_STEPS.get(task_suite_name, 400)
+    if task_ids is None:
+        task_ids = list(range(num_tasks - 1, -1, -1))
+    else:
+        bad_task_ids = [task_id for task_id in task_ids if task_id < 0 or task_id >= num_tasks]
+        if bad_task_ids:
+            raise ValueError(f"Invalid task_ids for {task_suite_name}: {bad_task_ids}")
     
     Path(video_out_path).mkdir(parents=True, exist_ok=True)
     
     print(f"Task suite: {task_suite_name}")
-    print(f"   Tasks: {num_tasks}, Trials per task: {num_trials}")
+    print(f"   Tasks: {len(task_ids)}/{num_tasks}, Trials per task: {num_trials}")
+    print(f"   Task IDs: {task_ids}")
     print(f"   Max steps: {max_steps}")
     
     total_episodes, total_successes = 0, 0
     
-    for task_id in tqdm(range(num_tasks - 1, -1, -1), desc="Tasks"):
+    for task_id in tqdm(task_ids, desc="Tasks"):
         task = task_suite.get_task(task_id)
         initial_states = task_suite.get_task_init_states(task_id)
         env, task_description = get_libero_env(task, LIBERO_ENV_RESOLUTION, seed)
@@ -328,6 +352,12 @@ def main():
     parser.add_argument("--replan_steps", type=int, default=5)
     parser.add_argument("--video_out", type=str, default="./eval_results")
     parser.add_argument("--no_video", action="store_true", help="Disable video recording for faster evaluation")
+    parser.add_argument("--task_ids", type=str, default=None,
+                        help="Comma-separated task IDs to evaluate, e.g. '0' or '0,3,9'. Default: all tasks")
+    parser.add_argument("--max_steps", type=int, default=None,
+                        help="Override max rollout steps per episode; useful for smoke tests")
+    parser.add_argument("--no_clip_actions", action="store_true",
+                        help="Disable clipping policy actions to LIBERO's [-1, 1] action range")
 
     args = parser.parse_args()
 
@@ -350,13 +380,23 @@ def main():
     print(f"   Server: {protocol}://{args.host}:{args.port}")
     print(f"   Task suite: {args.task_suite}")
     print(f"   Replan steps: {args.replan_steps}")
+    print(f"   Clip actions: {not args.no_clip_actions}")
     print()
     
     # Initialize client
     if args.client_type == "websocket":
-        client = WebSocketClient(args.host, args.port, replan_steps=args.replan_steps)
+        client = WebSocketClient(
+            args.host,
+            args.port,
+            replan_steps=args.replan_steps,
+            clip_actions=not args.no_clip_actions,
+        )
     else:
-        client = HTTPClient(args.host, args.port, replan_steps=args.replan_steps)
+        client = HTTPClient(args.host, args.port, replan_steps=args.replan_steps, clip_actions=not args.no_clip_actions)
+
+    task_ids = None
+    if args.task_ids:
+        task_ids = [int(x) for x in args.task_ids.replace(" ", "").split(",") if x]
     
     # Run evaluation
     video_path = Path(args.video_out) / args.task_suite
@@ -367,6 +407,8 @@ def main():
         seed=args.seed,
         video_out_path=str(video_path),
         save_video=not args.no_video,
+        task_ids=task_ids,
+        max_steps_override=args.max_steps,
     )
 
 

@@ -32,6 +32,22 @@ from .action_hub import build_action_space
 from .configuration_smolvlm_vla import SmolVLMVLAConfig
 
 
+def _resolve_torch_dtype(dtype_name: str | None):
+    """Map CLI/config dtype names to torch dtypes for the VLM backbone."""
+    if dtype_name is None:
+        return torch.float32
+    key = str(dtype_name).lower()
+    if key in {"float32", "fp32"}:
+        return torch.float32
+    if key in {"float16", "fp16", "half"}:
+        return torch.float16
+    if key in {"bfloat16", "bf16"}:
+        return torch.bfloat16
+    if key == "auto":
+        return "auto"
+    raise ValueError(f"Unsupported vlm_torch_dtype: {dtype_name}")
+
+
 class SmolVLMVLA(PreTrainedModel):
     """
     SmolVLM-VLA: HuggingFace-compatible Vision-Language-Action policy.
@@ -67,9 +83,10 @@ class SmolVLMVLA(PreTrainedModel):
 
         # SmolVLM backbone
         logging.info(f"Loading SmolVLM from: {config.smolvlm_model_path}")
+        vlm_torch_dtype = _resolve_torch_dtype(getattr(config, "vlm_torch_dtype", "float32"))
         self.vlm = AutoModelForImageTextToText.from_pretrained(
             config.smolvlm_model_path,
-            torch_dtype=torch.float32,  # Use float32 for training stability
+            torch_dtype=vlm_torch_dtype,
             trust_remote_code=True,
         )
         self.vlm_processor = AutoProcessor.from_pretrained(
