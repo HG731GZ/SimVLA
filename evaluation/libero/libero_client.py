@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
 import math
 import os
@@ -20,6 +21,145 @@ import time
 from pathlib import Path
 from typing import Deque, Dict, List, Optional
 
+
+def _has_libero_benchmark_layout(path: Path) -> bool:
+    return (
+        (path / "bddl_files").is_dir()
+        and (path / "init_files").is_dir()
+        and (path / "assets").is_dir()
+    )
+
+
+def _iter_libero_root_candidates():
+    seen = set()
+    roots = [
+        os.environ.get("LIBERO_ROOT"),
+        os.environ.get("SIMVLA_LIBERO_ROOT"),
+    ]
+    roots.extend(os.environ.get("PYTHONPATH", "").split(os.pathsep))
+    roots.extend(sys.path)
+
+    for root in roots:
+        if not root:
+            continue
+        candidate = Path(root).expanduser()
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield candidate
+
+
+def _add_libero_import_path(libero_root: Path, benchmark_root: Path) -> None:
+    candidates = [libero_root]
+    if benchmark_root.parent.name == "libero":
+        candidates.append(benchmark_root.parent.parent)
+
+    for candidate in candidates:
+        if (candidate / "libero" / "libero" / "__init__.py").is_file():
+            path = str(candidate.resolve())
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
+
+
+def _resolve_libero_benchmark_root() -> Path:
+    for root in _iter_libero_root_candidates():
+        for benchmark_root in (root / "libero" / "libero", root / "libero", root):
+            if _has_libero_benchmark_layout(benchmark_root):
+                benchmark_root = benchmark_root.resolve()
+                _add_libero_import_path(root, benchmark_root)
+                return benchmark_root
+
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec("libero.libero")
+    except ModuleNotFoundError:
+        spec = None
+    if spec and spec.origin:
+        benchmark_root = Path(spec.origin).resolve().parent
+        if _has_libero_benchmark_layout(benchmark_root):
+            return benchmark_root
+
+    raise RuntimeError(
+        "Cannot locate LIBERO. Set LIBERO_ROOT to the LIBERO repository root "
+        "(for example: export LIBERO_ROOT=/path/to/LIBERO)."
+    )
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return left.expanduser().resolve() == right.expanduser().resolve()
+
+
+def _default_libero_config_dir(benchmark_root: Path) -> Path:
+    digest = hashlib.sha1(str(benchmark_root).encode("utf-8")).hexdigest()[:12]
+    base_dir = Path(os.environ.get("TMPDIR", "/tmp")).expanduser()
+    return base_dir / f"simvla_libero_config_{digest}"
+
+
+def _resolve_libero_dataset_root(benchmark_root: Path) -> Path:
+    for env_name in ("LIBERO_DATASETS", "LIBERO_DATASET_ROOT"):
+        if os.environ.get(env_name):
+            return Path(os.environ[env_name]).expanduser().resolve()
+
+    simvla_datasets = Path(__file__).resolve().parents[2] / "datasets"
+    if simvla_datasets.exists():
+        return simvla_datasets.resolve()
+
+    return (benchmark_root.parent / "datasets").resolve()
+
+
+def _write_libero_config(config_file: Path, benchmark_root: Path) -> None:
+    config = {
+        "assets": benchmark_root / "assets",
+        "bddl_files": benchmark_root / "bddl_files",
+        "benchmark_root": benchmark_root,
+        "datasets": _resolve_libero_dataset_root(benchmark_root),
+        "init_states": benchmark_root / "init_files",
+    }
+    contents = "".join(f"{key}: {json.dumps(str(value))}\n" for key, value in config.items())
+
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    if config_file.exists() and config_file.read_text() == contents:
+        return
+
+    tmp_config = config_file.with_name(f"{config_file.name}.{os.getpid()}.tmp")
+    tmp_config.write_text(contents)
+    os.replace(tmp_config, config_file)
+
+
+def _prepare_libero_config() -> None:
+    if os.environ.get("SIMVLA_AUTO_LIBERO_CONFIG", "1").lower() in {"0", "false", "no"}:
+        return
+
+    benchmark_root = _resolve_libero_benchmark_root()
+    repo_config_dir = Path(__file__).resolve().parent / ".libero_config"
+    env_config_dir = os.environ.get("LIBERO_CONFIG_PATH")
+    explicit_root = bool(os.environ.get("LIBERO_ROOT") or os.environ.get("SIMVLA_LIBERO_ROOT"))
+
+    redirected_repo_config = False
+    if env_config_dir:
+        config_dir = Path(env_config_dir).expanduser()
+        if _same_path(config_dir, repo_config_dir):
+            config_dir = _default_libero_config_dir(benchmark_root)
+            redirected_repo_config = True
+    else:
+        config_dir = _default_libero_config_dir(benchmark_root)
+
+    config_dir = config_dir.resolve()
+    config_file = config_dir / "config.yaml"
+    should_write = explicit_root or redirected_repo_config or env_config_dir is None or not config_file.exists()
+
+    if should_write:
+        _write_libero_config(config_file, benchmark_root)
+
+    os.environ["LIBERO_CONFIG_PATH"] = str(config_dir)
+    print(f"LIBERO config: {config_file}")
+    print(f"LIBERO benchmark root: {benchmark_root}")
+
+
+_prepare_libero_config()
 
 import imageio
 import json_numpy

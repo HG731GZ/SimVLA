@@ -49,10 +49,10 @@ SMOLVLM_MODEL=${SMOLVLM_MODEL:-./pretrained/SmolVLM-500M-Instruct}
 # =============================================================================
 LEARNING_RATE=${LEARNING_RATE:-1e-4}
 NUM_ACTIONS=10          # Action horizon
-ITERS=200000
+ITERS=600000
 WARMUP_STEPS=0
 FREEZE_STEPS=1000
-SAVE_INTERVAL=10000
+SAVE_INTERVAL=20000
 LOG_INTERVAL=20
 NUM_WORKERS=4
 MAX_GRAD_NORM=1.0

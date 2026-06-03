@@ -1,0 +1,41 @@
+large训练：
+conda activate simvla
+cd /home/hg731/HG/SimVLA
+
+export PYTHONNOUSERSITE=1
+export CUDA_VISIBLE_DEVICES=0
+export NUM_PROCESSES=1
+export GRADIENT_ACCUMULATION_STEPS=1
+export SMOLVLM_MODEL=./pretrained/SmolVLM-500M-Instruct
+export VLM_TORCH_DTYPE=float32
+
+bash train_smolvlm_large.sh 32 0.1 ./runs/simvla_libero_all_large
+
+
+small训练：
+conda activate simvla
+cd /home/hg731/HG/SimVLA
+
+export PYTHONNOUSERSITE=1
+export CUDA_VISIBLE_DEVICES=0
+export NUM_PROCESSES=1
+export NUM_WORKERS=8
+export GRADIENT_ACCUMULATION_STEPS=1
+export SMOLVLM_MODEL=./pretrained/SmolVLM-500M-Instruct
+export VLM_TORCH_DTYPE=float32
+export LOG_INTERVAL=100
+export LEARNING_RATE=1e-5
+
+bash train_smolvlm_small.sh 32 0.1 ./runs/simvla_libero_all_small
+
+参数含义：
+
+4：每个 GPU / process 的 batch size。A6000 这种 48G 可以先试 32；OOM 就降到 16 或 8。
+0.1：VLM backbone 的学习率系数，实际 VLM LR = 2e-4 * 0.1 = 2e-5。
+./runs/simvla_libero_all_large：输出目录。
+large 脚本默认：hidden_size=1024、depth=24、num_heads=16、iters=200000、num_actions=10、image_size=384。
+
+
+断点续训：
+export ITERS=400000
+bash train_smolvlm_large.sh 32 0.1 ./runs/simvla_libero_all_small ./runs/simvla_libero_all_small/ckpt-200000

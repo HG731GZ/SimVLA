@@ -1,0 +1,32 @@
+终端1：
+conda activate simvla
+cd /home/hg731/HG/SimVLA-HG/SimVLA
+
+export PYTHONNOUSERSITE=1
+CUDA_VISIBLE_DEVICES=0 python evaluation/libero/serve_smolvlm_libero.py \
+  --checkpoint runs/simvla_libero_all_small/ckpt-200000 \
+  --norm_stats norm_stats/libero_norm.json \
+  --smolvlm_model pretrained/SmolVLM-500M-Instruct \
+  --host 127.0.0.1 \
+  --port 8102
+  
+
+终端2：
+conda activate libero
+cd /home/hg731/HG/SimVLA-HG/SimVLA/evaluation/libero
+
+export MUJOCO_GL=egl
+export LIBERO_ROOT=/home/hg731/HG/LIBERO
+
+python -u libero_client.py \
+  --host 127.0.0.1 \
+  --port 8102 \
+  --client_type websocket \
+  --task_suite libero_object \
+  --num_trials 5 \
+  --max_steps 500 \
+  --replan_steps 5 \
+  --video_out ./eval_results
+  
+ 
+ task_suite里面可以改成libero_goal等。

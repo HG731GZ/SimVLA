@@ -36,6 +36,14 @@ CUDA_VISIBLE_DEVICES=1 python serve_smolvlm_libero.py \
 
 ## 3. Run Evaluation
 
+Set `LIBERO_ROOT` to your local LIBERO repository. The evaluation client will
+generate a machine-local `config.yaml` automatically, so you do not need to edit
+`evaluation/libero/.libero_config/config.yaml`.
+
+```bash
+export LIBERO_ROOT=/path/to/LIBERO
+```
+
 Quick evaluation on selected tasks:
 
 Full evaluation on all task suites:

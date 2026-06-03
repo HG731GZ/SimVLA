@@ -1,4 +1,5 @@
 /runs/
 /pretrained/
 /evaluation/libero/eval_results/
+/evaluation/libero/.libero_config/
 /.idea/
