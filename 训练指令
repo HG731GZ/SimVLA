@@ -14,7 +14,7 @@ bash train_smolvlm_large.sh 32 0.1 ./runs/simvla_libero_all_large
 
 small训练：
 conda activate simvla
-cd /home/hg731/HG/SimVLA
+cd /home/hg731/HG/SimVLA-HG/SimVLA
 
 export PYTHONNOUSERSITE=1
 export CUDA_VISIBLE_DEVICES=0
@@ -23,7 +23,6 @@ export NUM_WORKERS=8
 export GRADIENT_ACCUMULATION_STEPS=1
 export SMOLVLM_MODEL=./pretrained/SmolVLM-500M-Instruct
 export VLM_TORCH_DTYPE=float32
-export LOG_INTERVAL=100
 export LEARNING_RATE=1e-5
 
 bash train_smolvlm_small.sh 32 0.1 ./runs/simvla_libero_all_small
@@ -37,5 +36,16 @@ large 脚本默认：hidden_size=1024、depth=24、num_heads=16、iters=200000�
 
 
 断点续训：
-export ITERS=400000
-bash train_smolvlm_large.sh 32 0.1 ./runs/simvla_libero_all_small ./runs/simvla_libero_all_small/ckpt-200000
+修改train_smolvlm_small.sh脚本中的iters后：
+conda activate simvla
+cd /home/hg731/HG/SimVLA-HG/SimVLA
+
+export PYTHONNOUSERSITE=1
+export CUDA_VISIBLE_DEVICES=0
+export NUM_PROCESSES=1
+export NUM_WORKERS=8
+export GRADIENT_ACCUMULATION_STEPS=1
+export SMOLVLM_MODEL=./pretrained/SmolVLM-500M-Instruct
+export VLM_TORCH_DTYPE=float32
+export LEARNING_RATE=1e-5
+bash train_smolvlm_small.sh 32 0.1 ./runs/simvla_libero_all_small ./runs/simvla_libero_all_small/ckpt-600000

@@ -3,3 +3,6 @@
 /evaluation/libero/eval_results/
 /evaluation/libero/.libero_config/
 /.idea/
+/.codex/
+/.agents/
+/datasets/metas/
